@@ -1,15 +1,51 @@
 name: Commit comments
+
 on:
+  # 1. 15分ごとに元リポジトリの更新を取得して自分に push する
+  schedule:
+    - cron: '*/15 * * * *'
+  # 2. 自分に push（同期）されたときにアクションを発火させる
   push:
     branches:
-      - master
+      - main # 元リポジトリのデフォルトブランチ（master の場合は master に変更）
+  # 3. 手動実行用
+  workflow_dispatch:
 
 jobs:
+  # --- STEP A: 元リポジトリから最新の更新を取り込んで Push する ---
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync with upstream
+        run: |
+          # Fork元のURLを取得して同期
+          UPSTREAM_URL=$(curl -s https://api.github.com/repos/${{ github.repository }} | jq -r '.parent.clone_url')
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch upstream
+          
+          DEFAULT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          git merge upstream/$DEFAULT_BRANCH
+          git push origin $DEFAULT_BRANCH
+
+  # --- STEP B: 見つけられたアクションを使って Discord にコメントを通知する ---
   comments:
+    needs: sync # 同期が完了した後に実行
     name: Commit comments
     runs-on: ubuntu-latest
     steps:
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # 最新の Node.js に指定
+
       - name: Comment on commit
         uses: Discord-Datamining/comments-action@main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
